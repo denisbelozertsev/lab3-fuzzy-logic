@@ -1,5 +1,6 @@
 import numpy as np
-import re
+import re 
+import matplotlib.pyplot as plt
 
 class FuzzySet:
     def __init__(self, name, f_type, params):
@@ -84,29 +85,44 @@ class FuzzySystem:
                         conclusion = (var.strip(), term.strip())
                         self.rules.append(Rule(conditions, conclusion))
 
-    def infer(self, inputs, implication='min', aggregation='max', defuzz='centroid', mechanism='mamdani'):
-        fuzzified_inputs = {}
-        for var_name, value in inputs.items():
-            if var_name in self.variables:
-                fuzzified_inputs[var_name] = self.variables[var_name].fuzzify(value)
-        out_var_name = self.rules[0].conclusion[0]
-        out_var = self.variables[out_var_name]
-        if mechanism == 'larsen':
-            num = 0.0
-            den = 0.0
-            for rule in self.rules:
-                w = rule.get_weight(fuzzified_inputs, agg_op='min')
-                if w > 0:
-                    term_name = rule.conclusion[1]
-                    fs = out_var.terms[term_name]
-                    center = fs.params[1] 
-                    num += w * center
-                    den += w
-            return num / den if den > 0 else 0.0
-        else:
-            x_vals = np.linspace(out_var.min_val, out_var.max_val, 500)
-            aggregated = np.zeros_like(x_vals)
-            for rule in self.rules:
+    def infer(self, inputs, implication='min', aggregation='max', defuzz='centroid', mechanism='mamdani', show_plot=True):
+       fuzzified_inputs={}
+       for var_name, value in inputs.items():
+           if var_name in self.variables:
+               fuzzified_inputs[var_name] = self.variables[var_name].fuzzify(value)
+       out_var_name=self.rules[0].conclusion[0]
+       out_var=self.variables[out_var_name]
+       if mechanism=='larsen':
+           num=0.0
+           den=0.0
+           rule_weights=[]
+
+           for rule in self.rules:
+               w = rule.get_weight(fuzzified_inputs, agg_op='min')
+               rule_weights.append(w)
+               if w>0:
+                   term_name = rule.conclusion[1]
+                   fs = out_var.terms[term_name]
+                   center = fs.params[1]
+                   num += w*center
+                   den += w
+           result=num/den if den>0 else 0.0
+           if show_plot:
+               plt.figure(figsize=(10, 5))
+               active_rules = [f"Правило {i+1}" for i, w in enumerate(rule_weights) if w>0]
+               active_weights = [w for w in rule_weights if w>0]
+               plt.bar(active_rules, active_weights, color='orange', alpha=0.7)
+               plt.title(f'Механизм уровней истинности (Ларсен)\nИтоговое значение: {result:.2f}')
+               plt.ylabel('Вес правила (уровень истинности)')
+               plt.xticks(rotation=45)
+               plt.grid(axis='y', alpha=0.3)
+               plt.tight_layout()
+               plt.show()
+           return result
+       else:
+           x_vals = np.linspace(out_var.min_val, out_var.max_val, 500)
+           aggregated = np.zeros_like(x_vals)
+           for rule in self.rules:
                 w = rule.get_weight(fuzzified_inputs, agg_op='min')
                 if w > 0:
                     term_name = rule.conclusion[1]
@@ -120,11 +136,24 @@ class FuzzySystem:
                         aggregated = np.maximum(aggregated, y_vals)
                     elif aggregation == 'sum':
                         aggregated = aggregated + y_vals
-            if defuzz == 'centroid':
-                if np.sum(aggregated) == 0:
-                    return 0.0
-                return np.sum(x_vals * aggregated) / np.sum(aggregated)
-            return 0.0
+           if np.sum(aggregated) == 0:
+                result = 0.0
+           else:
+                result = np.sum(x_vals * aggregated) / np.sum(aggregated)
+           if show_plot:
+                plt.figure(figsize=(10, 5))
+                plt.fill_between(x_vals, aggregated, color='skyblue', alpha=0.5, label='Агрегированное множество')
+                plt.plot(x_vals, aggregated, color='blue', linewidth=2)
+                plt.axvline(x=result, color='red', linestyle='--', linewidth=2, label=f'Центр тяжести = {result:.2f}')
+                title_imp = "MIN" if implication == 'min' else "PRODUCT"
+                title_agg = "MAX" if aggregation == 'max' else "SUM"
+                plt.title(f'Алгоритм Мамдани: Импликация {title_imp}, Агрегация {title_agg}')
+                plt.xlabel('Мощность кондиционера (0-100)')
+                plt.ylabel('Степень принадлежности')
+                plt.legend()
+                plt.grid(True, alpha=0.3)
+                plt.show()
+           return result
 
 def main():
     fs = FuzzySystem()
@@ -136,8 +165,7 @@ def main():
         print("1. Тест 1: 1 вход (Температура)")
         print("2. Тест 2: 2 входа (Температура + Влажность)")
         print("3. Тест 3: 3 входа (Температура + Влажность + Загрузка)")
-        print("4. Ввести свои значения вручную")
-        print("5. Выход")     
+        print("4. Выход")     
         choice = input("Ваш выбор (1-5): ").strip()
         if choice == "1":
             t = float(input("Введите температуру (-20...50): "))
@@ -155,38 +183,20 @@ def main():
             inputs = {'Температура': t, 'Влажность': v, 'Загрузка_двигателя': z}
             run_all_mechanisms(fs, inputs)
         elif choice == "4":
-            inputs = {}
-            print("\nДоступные переменные:")
-            for var in fs.variables:
-                if var != 'Мощность_кондиционера': # выход не вводим
-                    print(f" - {var} ({fs.variables[var].min_val}...{fs.variables[var].max_val})")
-            t = input("Температура (Enter - пропустить): ").strip()
-            if t: inputs['Температура'] = float(t)
-            v = input("Влажность (Enter - пропустить): ").strip()
-            if v: inputs['Влажность'] = float(v)
-            z = input("Загрузка двигателя (Enter - пропустить): ").strip()
-            if z: inputs['Загрузка_двигателя'] = float(z)
-            if inputs:
-                run_all_mechanisms(fs, inputs)
-            else:
-                print("Нет введенных данных.")
-        elif choice == "5":
             print("Выход.")
             break
         else:
             print("Неверный выбор.")
 def run_all_mechanisms(fs, inputs):
-    """Вспомогательная функция для вывода результатов всех 4 механизмов"""
     print(f"\nВходные данные: {inputs}")
-    print("-" * 55)
-    res_min = fs.infer(inputs, implication='min', aggregation='max')
-    res_prod = fs.infer(inputs, implication='prod', aggregation='max')
-    res_sum = fs.infer(inputs, implication='min', aggregation='sum')
-    res_larsen = fs.infer(inputs, mechanism='larsen')
-    print(f"1. Импликация MIN, Агрегация MAX (Мамдани): {res_min:.2f}")
-    print(f"2. Импликация PROD, Агрегация MAX (Мамдани): {res_prod:.2f}")
-    print(f"3. Импликация MIN, Агрегация SUM (Альтернатива): {res_sum:.2f}")
-    print(f"4. Уровни истинности (Ларсен): {res_larsen:.2f}")
-    print("-" * 55)
+    res_min = fs.infer(inputs, implication='min', aggregation='max', show_plot=True)
+    res_prod = fs.infer(inputs, implication='prod', aggregation='max', show_plot=True)
+    res_sum = fs.infer(inputs, implication='min', aggregation='sum', show_plot=True)
+    res_larsen = fs.infer(inputs, mechanism='larsen', show_plot=True)
+    print("РЕЗУЛЬТАТЫ ВЫЧИСЛЕНИЙ:")
+    print(f"1. Импликация MIN, Агрегация MAX:  {res_min:.2f}")
+    print(f"2. Импликация PROD, Агрегация MAX: {res_prod:.2f}")
+    print(f"3. Импликация MIN, Агрегация SUM:  {res_sum:.2f}")
+    print(f"4. Уровни истинности (Ларсен):     {res_larsen:.2f}")
 if __name__ == "__main__":
     main()
